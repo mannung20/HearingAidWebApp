@@ -60,7 +60,7 @@ const volumeDisplay = document.getElementById('volumeDisplay');
 const statusDiv = document.getElementById('status');
 const permissionGuide = document.getElementById('permissionGuide');
 
-let audioContext, microphoneStream, gainNode, isRunning = false;
+let audioContext, microphoneStream, gainNode, highpassFilter, isRunning = false;
 let hasPermission = false;
 
 // 초기 상태 설정
@@ -89,11 +89,20 @@ permissionBtn.addEventListener('click', async () => {
     permissionGuide.style.display = 'none';
     
   } catch (err) {
-    statusDiv.textContent = '❌ 마이크 접근 실패: ' + err.message;
+    let errorMessage = '❌ 마이크 접근 실패: ';
+    if (err.name === 'NotAllowedError') {
+      errorMessage += '마이크 권한을 허용해주세요.';
+    } else if (err.name === 'NotFoundError') {
+      errorMessage += '마이크 장치가 발견되지 않았습니다.';
+    } else if (err.name === 'OverconstrainedError'){
+        errorMessage += '지원되지 않는 마이크 설정입니다.';
+    } else {
+      errorMessage += err.message;
+    }
+    statusDiv.textContent = errorMessage;
     statusDiv.style.background = '#f8d7da';
     statusDiv.style.color = '#721c24';
     permissionGuide.style.display = 'block';
-    
     console.error('권한 오류:', err);
   }
 });
@@ -114,13 +123,23 @@ startButton.addEventListener('click', async () => {
     });
     
     audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    console.log("AudioContext state:", audioContext.state); //추가
+    if (audioContext.state === 'suspended') {
+        await audioContext.resume();
+        console.log("AudioContext resumed"); //추가
+    }
+
     const source = audioContext.createMediaStreamSource(microphoneStream);
     gainNode = audioContext.createGain();
-    
+    highpassFilter = audioContext.createBiquadFilter();
+    highpassFilter.type = 'highpass';
+    highpassFilter.frequency.setValueAtTime(100, audioContext.currentTime); // 100Hz highpass filter
+
     const volume = volumeSlider.value / 100;
     gainNode.gain.value = volume * 2;
-    
-    source.connect(gainNode);
+
+    source.connect(highpassFilter);
+    highpassFilter.connect(gainNode);
     gainNode.connect(audioContext.destination);
     
     startButton.disabled = true;
@@ -132,10 +151,21 @@ startButton.addEventListener('click', async () => {
     statusDiv.style.color = '#155724';
     
   } catch (err) {
-    statusDiv.textContent = '❌ 보청기 시작 실패: ' + err.message;
+    let errorMessage = '❌ 보청기 시작 실패: ';
+    if (err.name === 'NotAllowedError') {
+        errorMessage += '마이크 권한을 허용해주세요.';
+    } else if (err.name === 'NotFoundError'){
+        errorMessage += 'AudioContext가 지원되지 않습니다.';
+    } else if (err.name === 'OverconstrainedError'){
+        errorMessage += '지원되지 않는 마이크 설정입니다.';
+    } else {
+      errorMessage += err.message;
+    }
+    statusDiv.textContent = errorMessage;
     statusDiv.style.background = '#f8d7da';
     statusDiv.style.color = '#721c24';
     permissionGuide.style.display = 'block';
+    console.error('보청기 시작 오류:', err);
   }
 });
 
