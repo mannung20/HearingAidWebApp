@@ -60,10 +60,8 @@ const volumeDisplay = document.getElementById('volumeDisplay');
 const statusDiv = document.getElementById('status');
 const permissionGuide = document.getElementById('permissionGuide');
 
-let audioContext, microphoneStream, gainNode, highpassFilter, source, isRunning = false;
+let audioContext, microphoneStream, gainNode, highpassFilter, isRunning = false;
 let hasPermission = false;
-let wakeLock = null;
-let wasRunningBeforeHidden = false;
 
 // 초기 상태 설정
 startButton.disabled = true;
@@ -125,17 +123,17 @@ startButton.addEventListener('click', async () => {
     });
     
     audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    console.log("AudioContext state:", audioContext.state); 
+    console.log("AudioContext state:", audioContext.state); //추가
     if (audioContext.state === 'suspended') {
         await audioContext.resume();
-        console.log("AudioContext resumed"); 
+        console.log("AudioContext resumed"); //추가
     }
 
-    source = audioContext.createMediaStreamSource(microphoneStream);
+    const source = audioContext.createMediaStreamSource(microphoneStream);
     gainNode = audioContext.createGain();
     highpassFilter = audioContext.createBiquadFilter();
     highpassFilter.type = 'highpass';
-    highpassFilter.frequency.setValueAtTime(100, audioContext.currentTime); 
+    highpassFilter.frequency.setValueAtTime(100, audioContext.currentTime); // 100Hz highpass filter
 
     const volume = volumeSlider.value / 100;
     gainNode.gain.value = volume * 2;
@@ -152,16 +150,6 @@ startButton.addEventListener('click', async () => {
     statusDiv.style.background = '#d4edda';
     statusDiv.style.color = '#155724';
     
-    // Wake Lock API 사용 (지원하는 브라우저에서)
-    if ('wakeLock' in navigator) {
-      try {
-        wakeLock = await navigator.wakeLock.request('screen');
-        console.log('Wake Lock acquired');
-      } catch (err) {
-        console.error('Wake Lock request failed:', err);
-      }
-    }
-
   } catch (err) {
     let errorMessage = '❌ 보청기 시작 실패: ';
     if (err.name === 'NotAllowedError') {
@@ -181,50 +169,22 @@ startButton.addEventListener('click', async () => {
   }
 });
 
-// 3단계: 보청기 정지 (수정됨 - suspend 사용)
-stopButton.addEventListener('click', async () => {
-  // 마이크 스트림 정리
+// 3단계: 보청기 정지
+stopButton.addEventListener('click', () => {
   if (microphoneStream) {
     microphoneStream.getTracks().forEach(track => track.stop());
     microphoneStream = null;
   }
-  
-  // 오디오 노드들 명시적 해제
-  if (source) {
-    source.disconnect();
-    source = null;
-  }
-  if (gainNode) {
-    gainNode.disconnect();
-    gainNode = null;
-  }
-  if (highpassFilter) {
-    highpassFilter.disconnect();
-    highpassFilter = null;
-  }
-  
-  // AudioContext suspend (재사용 가능하도록)
-  if (audioContext && audioContext.state !== 'closed') {
-    try {
-      await audioContext.suspend();
-      console.log('AudioContext suspended (reusable)');
-    } catch (err) {
-      console.error('AudioContext suspend failed:', err);
-    }
-  }
-  
-  // Wake Lock 해제
-  if (wakeLock) {
-    wakeLock.release();
-    wakeLock = null;
-    console.log('Wake Lock released');
+  if (audioContext) {
+    audioContext.close();
+    audioContext = null;
   }
   
   startButton.disabled = false;
   stopButton.disabled = true;
   isRunning = false;
   
-  statusDiv.textContent = '⏹️ 보청기 정지됨 (재시작 가능)';
+  statusDiv.textContent = '⏹️ 보청기 정지됨';
   statusDiv.style.background = '#f8d7da';
   statusDiv.style.color = '#721c24';
 });
@@ -239,90 +199,16 @@ volumeSlider.addEventListener('input', function() {
   }
 });
 
-// Page Visibility API (개선됨)
-document.addEventListener('visibilitychange', async () => {
-  if (document.hidden && isRunning) {
-    // 백그라운드로 전환 시 일시정지
-    wasRunningBeforeHidden = true;
-    if (audioContext && audioContext.state === 'running') {
-      try {
-        await audioContext.suspend();
-        console.log('AudioContext suspended (background)');
-        statusDiv.textContent = '⏸️ 백그라운드 일시정지 중...';
-        statusDiv.style.background = '#fff3cd';
-        statusDiv.style.color = '#856404';
-      } catch (err) {
-        console.error('Background suspend failed:', err);
-      }
-    }
-  } else if (!document.hidden && wasRunningBeforeHidden && isRunning) {
-    // 포그라운드로 복귀 시 재개
-    if (audioContext && audioContext.state === 'suspended') {
-      try {
-        await audioContext.resume();
-        console.log('AudioContext resumed (foreground)');
-        statusDiv.textContent = '🔊 보청기 작동 중 (이어폰 착용 권장)';
-        statusDiv.style.background = '#d4edda';
-        statusDiv.style.color = '#155724';
-      } catch (err) {
-        console.error('Foreground resume failed:', err);
-      }
-    }
-    wasRunningBeforeHidden = false;
-  }
+// 페이지 종료 시 정리
+window.addEventListener('beforeunload', () => {
+  if (microphoneStream) microphoneStream.getTracks().forEach(track => track.stop());
+  if (audioContext) audioContext.close();
 });
 
-// 자동 복구 시스템
-async function checkAudioHealth() {
-  if (isRunning && audioContext) {
-    if (audioContext.state === 'suspended') {
-      console.log('AudioContext suspended, attempting resume...');
-      try {
-        await audioContext.resume();
-        console.log('AudioContext resumed successfully');
-      } catch (err) {
-        console.error('Failed to resume AudioContext:', err);
-        statusDiv.textContent = '⚠️ 연결 복구 중... 잠시만 기다려주세요';
-        statusDiv.style.background = '#fff3cd';
-        statusDiv.style.color = '#856404';
-      }
-    }
-  }
-}
-
-// 5초마다 상태 체크
-setInterval(checkAudioHealth, 5000);
-
-// 페이지 종료 시 정리 (개선됨)
-window.addEventListener('beforeunload', async () => {
-  if (microphoneStream) {
-    microphoneStream.getTracks().forEach(track => track.stop());
-  }
-  if (audioContext && audioContext.state !== 'closed') {
-    try {
-      await audioContext.suspend();
-    } catch (err) {
-      console.error('Beforeunload suspend failed:', err);
-    }
-  }
-  if (wakeLock) {
-    wakeLock.release();
-  }
+// 오디오 컨텍스트 자동 재개
+document.addEventListener('click', () => {
+  if (audioContext && audioContext.state === 'suspended') audioContext.resume();
 });
-
-// 오디오 컨텍스트 자동 재개 (개선됨)
-let resumeAudioContext = async () => {
-  if (audioContext && audioContext.state === 'suspended') {
-    try {
-      await audioContext.resume();
-    } catch (err) {
-      console.error("AudioContext resume failed:", err);
-    }
-  }
-}
-
-document.addEventListener('click', resumeAudioContext);
-document.addEventListener('touchstart', resumeAudioContext); // 모바일 지원
 </script>
 </body>
 </html>
