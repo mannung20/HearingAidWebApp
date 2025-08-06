@@ -16,10 +16,6 @@ button:hover { transform: translateY(-2px); }
 button:disabled { background: #cccccc; cursor: not-allowed; transform: none; }
 .permission-btn { background: #2196F3; }
 #stopButton { background: #f44336; }
-.mic-selection { margin-bottom: 20px; padding: 15px; background: #f0f8ff; border-radius: 10px; display: none; }
-.mic-selection label { display: block; margin-bottom: 10px; font-weight: bold; color: #333; font-size: 1.1em; }
-#micSelect { width: 100%; padding: 12px; border-radius: 8px; border: 2px solid #ddd; font-size: 14px; background: white; cursor: pointer; }
-#micSelect:focus { border-color: #2196F3; outline: none; }
 .volume-control { margin-bottom: 20px; padding: 20px; background: #f8f9fa; border-radius: 10px; }
 .volume-control label { display: block; margin-bottom: 15px; font-weight: bold; color: #333; font-size: 1.1em; }
 #volumeSlider { width: 100%; height: 8px; background: #ddd; outline: none; border-radius: 5px; margin-bottom: 15px; }
@@ -46,13 +42,6 @@ button:disabled { background: #cccccc; cursor: not-allowed; transform: none; }
       <button id="stopButton">정지</button>
     </div>
     
-    <div class="mic-selection">
-      <label for="micSelect">🎤 마이크 선택:</label>
-      <select id="micSelect">
-        <option value="">기본 마이크</option>
-      </select>
-    </div>
-    
     <div class="volume-control">
       <label for="volumeSlider">볼륨:</label>
       <input type="range" id="volumeSlider" min="0" max="100" value="50">
@@ -70,125 +59,15 @@ const volumeSlider = document.getElementById('volumeSlider');
 const volumeDisplay = document.getElementById('volumeDisplay');
 const statusDiv = document.getElementById('status');
 const permissionGuide = document.getElementById('permissionGuide');
-const micSelect = document.getElementById('micSelect');
 
 let audioContext, microphoneStream, gainNode, highpassFilter, source, isRunning = false;
 let hasPermission = false;
 let wakeLock = null;
 let wasRunningBeforeHidden = false;
-let selectedMicrophoneId = null;
 
 // 초기 상태 설정
 startButton.disabled = true;
 stopButton.disabled = true;
-
-// 마이크 목록 업데이트 함수
-async function updateMicrophoneList() {
-  try {
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    const audioInputs = devices.filter(device => device.kind === 'audioinput');
-    
-    // 기존 옵션 제거 (기본 옵션 제외)
-    while (micSelect.children.length > 1) {
-      micSelect.removeChild(micSelect.lastChild);
-    }
-    
-    if (audioInputs.length === 0) {
-      console.warn('사용 가능한 마이크가 없습니다');
-      return;
-    }
-    
-    audioInputs.forEach((device, index) => {
-      const option = document.createElement('option');
-      option.value = device.deviceId;
-      
-      // 기기 타입 자동 인식 및 아이콘 추가
-      let deviceName = device.label || `마이크 ${index + 1}`;
-      let icon = '🎤';
-      
-      const lowerName = deviceName.toLowerCase();
-      if (lowerName.includes('built-in') || lowerName.includes('internal') || lowerName.includes('default')) {
-        icon = '📱';
-        deviceName = `내장 마이크: ${deviceName}`;
-      } else if (lowerName.includes('headphone') || lowerName.includes('earphone') || lowerName.includes('airpods') || lowerName.includes('headset')) {
-        icon = '🎧';
-        deviceName = `이어폰 마이크: ${deviceName}`;
-      } else if (lowerName.includes('usb') || lowerName.includes('external') || lowerName.includes('webcam')) {
-        icon = '🖥️';
-        deviceName = `외장 마이크: ${deviceName}`;
-      }
-      
-      option.text = `${icon} ${deviceName}`;
-      micSelect.appendChild(option);
-    });
-    
-    console.log(`발견된 마이크 ${audioInputs.length}개`);
-    document.querySelector('.mic-selection').style.display = 'block';
-    
-  } catch (err) {
-    console.error('마이크 목록 업데이트 실패:', err);
-    statusDiv.textContent = '⚠️ 마이크 목록을 가져올 수 없습니다';
-    statusDiv.style.background = '#fff3cd';
-    statusDiv.style.color = '#856404';
-  }
-}
-
-// 실시간 마이크 전환 함수
-async function switchMicrophone(deviceId) {
-  if (!isRunning) return;
-  
-  try {
-    console.log('마이크 전환 시작:', deviceId);
-    statusDiv.textContent = '🔄 마이크 전환 중...';
-    statusDiv.style.background = '#fff3cd';
-    statusDiv.style.color = '#856404';
-    
-    // 현재 마이크 스트림 정지
-    if (microphoneStream) {
-      microphoneStream.getTracks().forEach(track => track.stop());
-    }
-    
-    // 새 마이크로 스트림 생성
-    const constraints = {
-      audio: {
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false
-      }
-    };
-    
-    if (deviceId) {
-      constraints.audio.deviceId = { exact: deviceId };
-    }
-    
-    microphoneStream = await navigator.mediaDevices.getUserMedia(constraints);
-    
-    // 기존 오디오 노드 연결 해제
-    if (source) {
-      source.disconnect();
-    }
-    
-    // 새 소스로 다시 연결
-    source = audioContext.createMediaStreamSource(microphoneStream);
-    source.connect(highpassFilter);
-    
-    console.log('마이크 전환 완료');
-    statusDiv.textContent = '🔊 보청기 작동 중 (이어폰 착용 권장)';
-    statusDiv.style.background = '#d4edda';
-    statusDiv.style.color = '#155724';
-    
-  } catch (err) {
-    console.error('마이크 전환 실패:', err);
-    statusDiv.textContent = '❌ 마이크 전환 실패 - 기본 마이크로 복구';
-    statusDiv.style.background = '#f8d7da';
-    statusDiv.style.color = '#721c24';
-    
-    // 기본 마이크로 복구 시도
-    micSelect.value = '';
-    selectedMicrophoneId = null;
-    setTimeout(() => switchMicrophone(null), 1000);
-  }
-}
 
 // 1단계: 마이크 권한 요청
 permissionBtn.addEventListener('click', async () => {
@@ -203,16 +82,13 @@ permissionBtn.addEventListener('click', async () => {
     stream.getTracks().forEach(track => track.stop());
     hasPermission = true;
     
-    statusDiv.textContent = '✅ 마이크 권한 허용됨 - 마이크를 선택하고 시작하세요';
+    statusDiv.textContent = '✅ 마이크 권한 허용됨 - 시작 버튼을 눌러주세요';
     statusDiv.style.background = '#d4edda';
     statusDiv.style.color = '#155724';
     
     permissionBtn.disabled = true;
     startButton.disabled = false;
     permissionGuide.style.display = 'none';
-    
-    // 마이크 목록 업데이트
-    await updateMicrophoneList();
     
   } catch (err) {
     let errorMessage = '❌ 마이크 접근 실패: ';
@@ -233,27 +109,20 @@ permissionBtn.addEventListener('click', async () => {
   }
 });
 
-// 2단계: 보청기 시작 (마이크 선택 지원)
+// 2단계: 보청기 시작
 startButton.addEventListener('click', async () => {
   try {
     statusDiv.textContent = '🚀 보청기 시작 중...';
     statusDiv.style.background = '#fff3cd';
     statusDiv.style.color = '#856404';
     
-    // 선택된 마이크 설정
-    const constraints = {
+    microphoneStream = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: false,
         noiseSuppression: false,
         autoGainControl: false
       }
-    };
-    
-    if (selectedMicrophoneId) {
-      constraints.audio.deviceId = { exact: selectedMicrophoneId };
-    }
-    
-    microphoneStream = await navigator.mediaDevices.getUserMedia(constraints);
+    });
     
     audioContext = new (window.AudioContext || window.webkitAudioContext)();
     console.log("AudioContext state:", audioContext.state); 
@@ -358,16 +227,6 @@ stopButton.addEventListener('click', async () => {
   statusDiv.textContent = '⏹️ 보청기 정지됨 (재시작 가능)';
   statusDiv.style.background = '#f8d7da';
   statusDiv.style.color = '#721c24';
-});
-
-// 마이크 선택 변경 이벤트
-micSelect.addEventListener('change', function() {
-  selectedMicrophoneId = this.value || null;
-  console.log('마이크 선택 변경:', selectedMicrophoneId);
-  
-  if (isRunning) {
-    switchMicrophone(selectedMicrophoneId);
-  }
 });
 
 // 볼륨 조절
