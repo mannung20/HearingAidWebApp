@@ -26,6 +26,7 @@ button:disabled { background: #cccccc; cursor: not-allowed; transform: none; }
 #volumeSlider::-webkit-slider-thumb { appearance: none; width: 25px; height: 25px; background: #4CAF50; border-radius: 50%; cursor: pointer; }
 #volumeDisplay { font-size: 1.5em; font-weight: bold; color: #4CAF50; }
 #status { padding: 15px; border-radius: 8px; font-weight: bold; background: #e8f5e8; color: #2e7d2e; margin-top: 20px; font-size: 1.1em; }
+.device-quality { font-size: 12px; color: #666; margin-top: 5px; }
 @media (max-width: 480px) { body { padding: 10px; } .container { padding: 20px; } h1 { font-size: 1.5em; } button { padding: 12px 20px; font-size: 14px; margin: 5px; } }
 </style>
 </head>
@@ -51,6 +52,7 @@ button:disabled { background: #cccccc; cursor: not-allowed; transform: none; }
       <select id="micSelect">
         <option value="">기본 마이크</option>
       </select>
+      <div id="micQuality" class="device-quality"></div>
     </div>
     
     <div class="volume-control">
@@ -71,18 +73,98 @@ const volumeDisplay = document.getElementById('volumeDisplay');
 const statusDiv = document.getElementById('status');
 const permissionGuide = document.getElementById('permissionGuide');
 const micSelect = document.getElementById('micSelect');
+const micQuality = document.getElementById('micQuality');
 
 let audioContext, microphoneStream, gainNode, highpassFilter, source, isRunning = false;
 let hasPermission = false;
 let wakeLock = null;
 let wasRunningBeforeHidden = false;
 let selectedMicrophoneId = null;
+let failoverAttempts = 0;
+const MAX_FAILOVER_ATTEMPTS = 3;
 
 // 초기 상태 설정
 startButton.disabled = true;
 stopButton.disabled = true;
 
-// 마이크 목록 업데이트 함수
+// Phase 1.7: 실시간 장치 감지 및 안정성 강화
+
+// 마이크 품질 검증 함수
+async function validateAudioStream(stream) {
+  try {
+    const tracks = stream.getAudioTracks();
+    if (tracks.length === 0) {
+      throw new Error('오디오 트랙이 없습니다');
+    }
+    
+    const track = tracks[0];
+    const settings = track.getSettings();
+    
+    // 트랙 상태 확인
+    if (track.readyState !== 'live') {
+      throw new Error(`트랙 상태 이상: ${track.readyState}`);
+    }
+    
+    // 품질 정보 표시
+    const sampleRate = settings.sampleRate || 'N/A';
+    const channelCount = settings.channelCount || 'N/A';
+    
+    micQuality.innerHTML = `
+      📊 품질: ${sampleRate}Hz, ${channelCount}채널
+      <br>📶 상태: ${track.enabled ? '활성' : '비활성'}
+    `;
+    
+    console.log('마이크 품질 검증 완료:', settings);
+    return true;
+    
+  } catch (err) {
+    console.error('마이크 품질 검증 실패:', err);
+    micQuality.textContent = '❌ 품질 검증 실패';
+    return false;
+  }
+}
+
+// 스마트 복구 시스템
+async function attemptSmartRecovery(originalDeviceId) {
+  const fallbackOptions = [
+    { id: null, name: '기본 마이크' },
+    { id: 'first-available', name: '첫번째 가용 마이크' }
+  ];
+  
+  for (const option of fallbackOptions) {
+    try {
+      console.log(`복구 시도 ${failoverAttempts + 1}/${MAX_FAILOVER_ATTEMPTS}: ${option.name}`);
+      
+      let deviceId = option.id;
+      if (deviceId === 'first-available') {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const audioInputs = devices.filter(device => device.kind === 'audioinput');
+        deviceId = audioInputs.length > 0 ? audioInputs[0].deviceId : null;
+      }
+      
+      await switchMicrophone(deviceId, true); // skipFailover = true
+      failoverAttempts = 0; // 성공 시 초기화
+      return true;
+      
+    } catch (err) {
+      console.error(`복구 실패 (${option.name}):`, err);
+      continue;
+    }
+  }
+  
+  failoverAttempts = 0;
+  statusDiv.textContent = '❌ 모든 복구 시도 실패 - 권한 재요청 필요';
+  statusDiv.style.background = '#f8d7da';
+  statusDiv.style.color = '#721c24';
+  
+  // 권한 버튼 다시 활성화
+  permissionBtn.disabled = false;
+  startButton.disabled = true;
+  
+  return false;
+}
+
+// 마이크 목록 업데이트 함수 (개선됨)
 async function updateMicrophoneList() {
   try {
     const devices = await navigator.mediaDevices.enumerateDevices();
@@ -98,6 +180,8 @@ async function updateMicrophoneList() {
       return;
     }
     
+    let wirelessDeviceDetected = false;
+    
     audioInputs.forEach((device, index) => {
       const option = document.createElement('option');
       option.value = device.deviceId;
@@ -107,10 +191,18 @@ async function updateMicrophoneList() {
       let icon = '🎤';
       
       const lowerName = deviceName.toLowerCase();
-      if (lowerName.includes('built-in') || lowerName.includes('internal') || lowerName.includes('default')) {
+      
+      // 무선 장치 감지
+      if (lowerName.includes('bluetooth') || lowerName.includes('wireless') || 
+          lowerName.includes('airpods') || lowerName.includes('buds') || 
+          lowerName.includes('headset')) {
+        wirelessDeviceDetected = true;
+        icon = '📡';
+        deviceName = `무선 마이크: ${deviceName}`;
+      } else if (lowerName.includes('built-in') || lowerName.includes('internal') || lowerName.includes('default')) {
         icon = '📱';
         deviceName = `내장 마이크: ${deviceName}`;
-      } else if (lowerName.includes('headphone') || lowerName.includes('earphone') || lowerName.includes('airpods') || lowerName.includes('headset')) {
+      } else if (lowerName.includes('headphone') || lowerName.includes('earphone')) {
         icon = '🎧';
         deviceName = `이어폰 마이크: ${deviceName}`;
       } else if (lowerName.includes('usb') || lowerName.includes('external') || lowerName.includes('webcam')) {
@@ -122,7 +214,14 @@ async function updateMicrophoneList() {
       micSelect.appendChild(option);
     });
     
-    console.log(`발견된 마이크 ${audioInputs.length}개`);
+    // 무선 장치 경고
+    if (wirelessDeviceDetected && !isRunning) {
+      statusDiv.textContent = '⚠️ 무선이어폰 감지: 지연시간(160ms+) 발생 가능. 유선 이어폰 권장';
+      statusDiv.style.background = '#fff3cd';
+      statusDiv.style.color = '#856404';
+    }
+    
+    console.log(`발견된 마이크 ${audioInputs.length}개 (무선: ${wirelessDeviceDetected ? 'O' : 'X'})`);
     document.querySelector('.mic-selection').style.display = 'block';
     
   } catch (err) {
@@ -133,8 +232,8 @@ async function updateMicrophoneList() {
   }
 }
 
-// 실시간 마이크 전환 함수
-async function switchMicrophone(deviceId) {
+// 실시간 마이크 전환 함수 (개선됨)
+async function switchMicrophone(deviceId, skipFailover = false) {
   if (!isRunning) return;
   
   try {
@@ -163,6 +262,12 @@ async function switchMicrophone(deviceId) {
     
     microphoneStream = await navigator.mediaDevices.getUserMedia(constraints);
     
+    // 마이크 품질 검증
+    const isValid = await validateAudioStream(microphoneStream);
+    if (!isValid) {
+      throw new Error('마이크 품질 검증 실패');
+    }
+    
     // 기존 오디오 노드 연결 해제
     if (source) {
       source.disconnect();
@@ -177,18 +282,36 @@ async function switchMicrophone(deviceId) {
     statusDiv.style.background = '#d4edda';
     statusDiv.style.color = '#155724';
     
+    failoverAttempts = 0; // 성공 시 초기화
+    
   } catch (err) {
     console.error('마이크 전환 실패:', err);
-    statusDiv.textContent = '❌ 마이크 전환 실패 - 기본 마이크로 복구';
-    statusDiv.style.background = '#f8d7da';
-    statusDiv.style.color = '#721c24';
+    failoverAttempts++;
     
-    // 기본 마이크로 복구 시도
-    micSelect.value = '';
-    selectedMicrophoneId = null;
-    setTimeout(() => switchMicrophone(null), 1000);
+    if (!skipFailover && failoverAttempts <= MAX_FAILOVER_ATTEMPTS) {
+      statusDiv.textContent = `❌ 마이크 전환 실패 (${failoverAttempts}/${MAX_FAILOVER_ATTEMPTS}) - 복구 중...`;
+      statusDiv.style.background = '#f8d7da';
+      statusDiv.style.color = '#721c24';
+      
+      // 스마트 복구 시도
+      setTimeout(() => attemptSmartRecovery(deviceId), 1000);
+    } else {
+      statusDiv.textContent = '❌ 마이크 전환 최종 실패';
+      statusDiv.style.background = '#f8d7da';
+      statusDiv.style.color = '#721c24';
+      
+      if (!skipFailover) {
+        await attemptSmartRecovery(deviceId);
+      }
+    }
   }
 }
+
+// 실시간 장치 변경 감지 이벤트 리스너
+navigator.mediaDevices.addEventListener('devicechange', () => {
+  console.log('장치 변경 감지 - 마이크 목록 업데이트');
+  setTimeout(updateMicrophoneList, 500); // 500ms 지연으로 안정성 확보
+});
 
 // 1단계: 마이크 권한 요청
 permissionBtn.addEventListener('click', async () => {
@@ -254,6 +377,12 @@ startButton.addEventListener('click', async () => {
     }
     
     microphoneStream = await navigator.mediaDevices.getUserMedia(constraints);
+    
+    // 마이크 품질 검증
+    const isValid = await validateAudioStream(microphoneStream);
+    if (!isValid) {
+      throw new Error('마이크 품질 검증 실패');
+    }
     
     audioContext = new (window.AudioContext || window.webkitAudioContext)();
     console.log("AudioContext state:", audioContext.state); 
@@ -351,6 +480,9 @@ stopButton.addEventListener('click', async () => {
     console.log('Wake Lock released');
   }
   
+  // 품질 정보 초기화
+  micQuality.textContent = '';
+  
   startButton.disabled = false;
   stopButton.disabled = true;
   isRunning = false;
@@ -413,7 +545,7 @@ document.addEventListener('visibilitychange', async () => {
   }
 });
 
-// 자동 복구 시스템
+// 자동 복구 시스템 (개선됨)
 async function checkAudioHealth() {
   if (isRunning && audioContext) {
     if (audioContext.state === 'suspended') {
@@ -464,6 +596,13 @@ let resumeAudioContext = async () => {
 
 document.addEventListener('click', resumeAudioContext);
 document.addEventListener('touchstart', resumeAudioContext); // 모바일 지원
+
+// 초기화: 페이지 로드 시 마이크 목록 확인
+setTimeout(async () => {
+  if (hasPermission) {
+    await updateMicrophoneList();
+  }
+}, 100);
 </script>
 </body>
 </html>
