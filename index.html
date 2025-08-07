@@ -121,6 +121,21 @@ button:disabled { background: #cccccc; cursor: not-allowed; transform: none; }
           <input type="range" id="releaseSlider" min="0.01" max="1.0" value="0.1" step="0.01">
           <div class="compressor-display">값: <span id="releaseDisplay">0.1s</span></div>
         </div>
+        <div class="compressor-control">
+          <label>
+            <input type="checkbox" id="autoQCheckbox" checked> 🤖 자동 Q값 제어
+          </label>
+        </div>
+        <div class="compressor-control" id="manualQMinControl" style="display:none;">
+          <label for="minQSlider">🔹 최소 Q값 (조용한 환경):</label>
+          <input type="range" id="minQSlider" min="1" max="50" value="5" step="0.5">
+          <div class="compressor-display">값: <span id="minQDisplay">5</span></div>
+        </div>
+        <div class="compressor-control" id="manualQMaxControl" style="display:none;">
+          <label for="maxQSlider">🔸 최대 Q값 (시끄러운 환경):</label>
+          <input type="range" id="maxQSlider" min="1" max="100" value="50" step="1">
+          <div class="compressor-display">값: <span id="maxQDisplay">50</span></div>
+        </div>
         <div class="ai-status" style="display: block !important;">
           <div>🎚️ 압축량: <span id="compressionAmount">0%</span></div>
           <div>🌍 환경: <span id="environmentType">측정 중</span></div>
@@ -158,6 +173,15 @@ const compressionAmount = document.getElementById('compressionAmount');
 const environmentType = document.getElementById('environmentType');
 const adaptiveStrength = document.getElementById('adaptiveStrength');
 
+// 자동/수동 Q값 제어 요소들 (새로 추가)
+const autoQCheckbox = document.getElementById('autoQCheckbox');
+const minQSlider = document.getElementById('minQSlider');
+const maxQSlider = document.getElementById('maxQSlider');
+const minQDisplay = document.getElementById('minQDisplay');
+const maxQDisplay = document.getElementById('maxQDisplay');
+const manualQMinControl = document.getElementById('manualQMinControl');
+const manualQMaxControl = document.getElementById('manualQMaxControl');
+
 let audioContext, microphoneStream, gainNode, highpassFilter, source, isRunning = false;
 let notchFilter60Hz, lowpassFilter4kHz, analyserNode; // Phase 1.9 추가 필터들
 let compressorNode, analyserEnv, adaptiveFilterStrength = 0; // Phase 2.0 고급모드 변수들
@@ -167,6 +191,11 @@ let wasRunningBeforeHidden = false;
 let selectedMicrophoneId = null;
 let failoverAttempts = 0;
 const MAX_FAILOVER_ATTEMPTS = 3;
+
+// 자동/수동 Q값 제어 변수들 (새로 추가)
+let minQValue = 5;
+let maxQValue = 50;
+let autoQEnabled = true;
 
 // 초기 상태 설정
 startButton.disabled = true;
@@ -683,6 +712,37 @@ ratioSlider.addEventListener('input', updateCompressorSettings);
 attackSlider.addEventListener('input', updateCompressorSettings);
 releaseSlider.addEventListener('input', updateCompressorSettings);
 
+// 자동/수동 Q값 제어 이벤트 리스너 (새로 추가)
+autoQCheckbox.addEventListener('change', function() {
+  autoQEnabled = this.checked;
+  const displayStyle = autoQEnabled ? 'none' : 'block';
+  manualQMinControl.style.display = displayStyle;
+  manualQMaxControl.style.display = displayStyle;
+  console.log('Q값 제어 모드:', autoQEnabled ? '자동' : '수동');
+});
+
+minQSlider.addEventListener('input', function() {
+  minQValue = parseFloat(this.value);
+  minQDisplay.textContent = minQValue;
+  // 최소값이 최대값보다 크면 최대값 조정
+  if (minQValue >= maxQValue) {
+    maxQValue = minQValue + 1;
+    maxQSlider.value = maxQValue;
+    maxQDisplay.textContent = maxQValue;
+  }
+});
+
+maxQSlider.addEventListener('input', function() {
+  maxQValue = parseFloat(this.value);
+  maxQDisplay.textContent = maxQValue;
+  // 최대값이 최소값보다 작으면 최소값 조정
+  if (maxQValue <= minQValue) {
+    minQValue = maxQValue - 1;
+    minQSlider.value = minQValue;
+    minQDisplay.textContent = minQValue;
+  }
+});
+
 // Phase 2.0: 고급모드 설정 함수
 async function setupAdvancedMode() {
   try {
@@ -819,11 +879,24 @@ function startAdvancedMonitoring() {
     adaptiveStrength.textContent = `${adaptiveFilterStrength}%`;
     compressionAmount.textContent = `${compressionPercent}%`;
     
-    // 적응적 필터 적용 (notchFilter Q값 조절) - 안전한 범위와 부드러운 변화
+    // 적응적 필터 적용 (자동/수동 Q값 제어) - 개선된 로직
     if (notchFilter60Hz && document.getElementById('powerNoiseFilter').checked) {
-      let qValue = 5 + (adaptiveFilterStrength / 100) * 10; // 5-15 범위로 제한
-      qValue = Math.min(Math.max(qValue, 5), 15); // 안전 범위 제한
-      notchFilter60Hz.Q.linearRampToValueAtTime(qValue, audioContext.currentTime + 0.1); // 부드러운 변화
+      let qValue;
+      
+      if (autoQEnabled) {
+        // 자동 모드: 환경에 따라 사용자 설정 범위 내에서 동적 조절
+        const qRange = maxQValue - minQValue;
+        qValue = minQValue + (adaptiveFilterStrength / 100) * qRange;
+        console.log(`자동 Q값: ${qValue.toFixed(1)} (환경: ${adaptiveFilterStrength}%)`);
+      } else {
+        // 수동 모드: 최소값 고정 사용 (사용자가 직접 제어)
+        qValue = minQValue;
+        console.log(`수동 Q값: ${qValue} (고정)`);
+      }
+      
+      // 안전 범위 제한 (1-100)
+      qValue = Math.min(Math.max(qValue, 1), 100);
+      notchFilter60Hz.Q.linearRampToValueAtTime(qValue, audioContext.currentTime + 0.1);
     }
     
     requestAnimationFrame(updateAdvancedStats);
