@@ -374,9 +374,12 @@ async function switchMicrophone(deviceId, skipFailover = false) {
     
   } catch (err) {
     console.error('마이크 전환 실패:', err);
-    failoverAttempts++;
-    
-    if (!skipFailover && failoverAttempts <= MAX_FAILOVER_ATTEMPTS) {
+    statusDiv.textContent = `❌ 마이크 전환 실패: ${err.message}`;
+    statusDiv.style.background = '#f8d7da';
+    statusDiv.style.color = '#721c24';
+      failoverAttempts++;
+      
+      if (!skipFailover && failoverAttempts <= MAX_FAILOVER_ATTEMPTS) {
       statusDiv.textContent = `❌ 마이크 전환 실패 (${failoverAttempts}/${MAX_FAILOVER_ATTEMPTS}) - 복구 중...`;
       statusDiv.style.background = '#f8d7da';
       statusDiv.style.color = '#721c24';
@@ -473,10 +476,11 @@ startButton.addEventListener('click', async () => {
     }
     
     audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    console.log("AudioContext state:", audioContext.state); 
+    console.log("AudioContext initial state:", audioContext.state); 
     if (audioContext.state === 'suspended') {
+        console.log("Attempting to resume AudioContext...");
         await audioContext.resume();
-        console.log("AudioContext resumed"); 
+        console.log("AudioContext state after resume:", audioContext.state); 
     }
 
     source = audioContext.createMediaStreamSource(microphoneStream);
@@ -616,12 +620,12 @@ stopButton.addEventListener('click', async () => {
 });
 
 // 마이크 선택 변경 이벤트
-micSelect.addEventListener('change', function() {
+micSelect.addEventListener('change', async function() {
   selectedMicrophoneId = this.value || null;
   console.log('마이크 선택 변경:', selectedMicrophoneId);
   
   if (isRunning) {
-    switchMicrophone(selectedMicrophoneId);
+    await switchMicrophone(selectedMicrophoneId);
   }
 });
 
@@ -728,7 +732,11 @@ function updateCompressorSettings() {
 
 // Phase 2.0: 오디오 체인 연결 함수
 function connectAudioChain() {
-  if (!source || !notchFilter60Hz) return;
+  console.log("Connecting audio chain...");
+  if (!source || !notchFilter60Hz) {
+    console.warn("Source or Notch filter not ready");
+    return;
+  }
   
   // 기존 연결 해제
   try {
@@ -760,6 +768,8 @@ function connectAudioChain() {
   highpassFilter.connect(gainNode);
   gainNode.connect(analyserNode);
   analyserNode.connect(audioContext.destination);
+  
+  console.log("Audio chain connected.");
 }
 
 // Phase 2.0: 고급모드 모니터링 시작
@@ -797,12 +807,12 @@ function startAdvancedMonitoring() {
     
     // 압축량 계산 (간단한 추정)
     analyserEnv.getFloatTimeDomainData(timeDataArray);
-    let rms = 0;
+    let compressionRms = 0;
     for (let i = 0; i < timeDataArray.length; i++) {
-      rms += timeDataArray[i] * timeDataArray[i];
+      compressionRms += timeDataArray[i] * timeDataArray[i];
     }
-    rms = Math.sqrt(rms / timeDataArray.length);
-    const compressionPercent = Math.min(Math.round(rms * 100), 100);
+    compressionRms = Math.sqrt(compressionRms / timeDataArray.length);
+    const compressionPercent = Math.min(Math.round(compressionRms * 100), 100);
     
     // 디스플레이 업데이트
     environmentType.textContent = environment;
@@ -961,7 +971,9 @@ window.addEventListener('beforeunload', async () => {
 let resumeAudioContext = async () => {
   if (audioContext && audioContext.state === 'suspended') {
     try {
+      console.log("AudioContext state before resume:", audioContext.state);
       await audioContext.resume();
+      console.log("AudioContext state after resume:", audioContext.state);
     } catch (err) {
       console.error("AudioContext resume failed:", err);
     }
