@@ -767,20 +767,20 @@ function startAdvancedMonitoring() {
   if (!analyserEnv || !advancedModeCheckbox.checked) return;
   
   const bufferLength = analyserEnv.frequencyBinCount;
-  const dataArray = new Uint8Array(bufferLength);
+  const dataArray = new Float32Array(bufferLength); // Float 배열로 변경
   const timeDataArray = new Float32Array(bufferLength);
   
   function updateAdvancedStats() {
     if (!isRunning || !analyserEnv || !advancedModeCheckbox.checked) return;
     
-    // 환경 분석
-    analyserEnv.getByteFrequencyData(dataArray);
-    let sum = 0;
+    // 환경 분석 - 정확한 RMS 기반 노이즈 측정
+    analyserEnv.getFloatFrequencyData(dataArray);
+    let rms = 0;
     for (let i = 0; i < bufferLength; i++) {
-      sum += dataArray[i];
+      rms += dataArray[i] * dataArray[i];
     }
-    const average = sum / bufferLength;
-    const noiseLevel = Math.round(20 * Math.log10(average / 255) + 60);
+    rms = Math.sqrt(rms / bufferLength);
+    const noiseLevel = Math.round(20 * Math.log10(Math.abs(rms) + 1e-10));
     
     // 환경 분류 및 적응적 필터 강도 설정
     let environment = '측정 중';
@@ -809,10 +809,11 @@ function startAdvancedMonitoring() {
     adaptiveStrength.textContent = `${adaptiveFilterStrength}%`;
     compressionAmount.textContent = `${compressionPercent}%`;
     
-    // 적응적 필터 적용 (notchFilter Q값 조절)
+    // 적응적 필터 적용 (notchFilter Q값 조절) - 안전한 범위와 부드러운 변화
     if (notchFilter60Hz && document.getElementById('powerNoiseFilter').checked) {
-      const qValue = 5 + (adaptiveFilterStrength / 100) * 15; // 5-20 범위
-      notchFilter60Hz.Q.setValueAtTime(qValue, audioContext.currentTime);
+      let qValue = 5 + (adaptiveFilterStrength / 100) * 10; // 5-15 범위로 제한
+      qValue = Math.min(Math.max(qValue, 5), 15); // 안전 범위 제한
+      notchFilter60Hz.Q.linearRampToValueAtTime(qValue, audioContext.currentTime + 0.1); // 부드러운 변화
     }
     
     requestAnimationFrame(updateAdvancedStats);
