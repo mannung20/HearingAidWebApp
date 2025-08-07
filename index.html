@@ -718,7 +718,14 @@ autoQCheckbox.addEventListener('change', function() {
   const displayStyle = autoQEnabled ? 'none' : 'block';
   manualQMinControl.style.display = displayStyle;
   manualQMaxControl.style.display = displayStyle;
-  console.log('Q값 제어 모드:', autoQEnabled ? '자동' : '수동');
+  
+  console.log('🔄 Q값 제어 모드 변경:', autoQEnabled ? '자동' : '수동');
+  
+  // 수동 모드로 전환 시 즉시 Q값 적용
+  if (!autoQEnabled && notchFilter60Hz && isRunning) {
+    applyManualQValue();
+    console.log('수동 모드로 전환 - 즉시 Q값 적용');
+  }
 });
 
 minQSlider.addEventListener('input', function() {
@@ -730,6 +737,13 @@ minQSlider.addEventListener('input', function() {
     maxQSlider.value = maxQValue;
     maxQDisplay.textContent = maxQValue;
   }
+  
+  // 수동 모드에서 실시간 Q값 적용
+  if (!autoQEnabled && notchFilter60Hz && isRunning) {
+    applyManualQValue();
+  }
+  
+  console.log(`최소 Q값 변경: ${minQValue} (자동모드: ${autoQEnabled})`);
 });
 
 maxQSlider.addEventListener('input', function() {
@@ -741,7 +755,37 @@ maxQSlider.addEventListener('input', function() {
     minQSlider.value = minQValue;
     minQDisplay.textContent = minQValue;
   }
+  
+  // 수동 모드에서 실시간 Q값 적용
+  if (!autoQEnabled && notchFilter60Hz && isRunning) {
+    applyManualQValue();
+  }
+  
+  console.log(`최대 Q값 변경: ${maxQValue} (자동모드: ${autoQEnabled})`);
 });
+
+// 수동 모드 Q값 실시간 적용 함수 (새로 추가)
+function applyManualQValue() {
+  if (!notchFilter60Hz || !document.getElementById('powerNoiseFilter').checked) {
+    console.log('수동 Q값 적용 시폐: 필터 비활성화');
+    return;
+  }
+  
+  // 수동 모드에서는 최소 Q값 사용 (사용자가 직접 제어)
+  const qValue = Math.min(Math.max(minQValue, 1), 100);
+  
+  try {
+    notchFilter60Hz.Q.linearRampToValueAtTime(qValue, audioContext.currentTime + 0.1);
+    console.log(`🔧 수동 Q값 적용: ${qValue} (범위: ${minQValue}-${maxQValue})`);
+    
+    // 디스플레이 업데이트
+    if (adaptiveStrength) {
+      adaptiveStrength.textContent = `Q: ${minQValue}-${maxQValue}`;
+    }
+  } catch (err) {
+    console.error('수동 Q값 적용 실패:', err);
+  }
+}
 
 // Phase 2.0: 고급모드 설정 함수
 async function setupAdvancedMode() {
@@ -843,6 +887,8 @@ function startAdvancedMonitoring() {
   function updateAdvancedStats() {
     if (!isRunning || !analyserEnv || !advancedModeCheckbox.checked) return;
     
+    console.log('🔍 고급모드 모니터링 작동 중... 자동모드:', autoQEnabled);
+    
     // 환경 분석 - 정확한 RMS 기반 노이즈 측정
     analyserEnv.getFloatFrequencyData(dataArray);
     let rms = 0;
@@ -852,17 +898,27 @@ function startAdvancedMonitoring() {
     rms = Math.sqrt(rms / bufferLength);
     const noiseLevel = Math.round(20 * Math.log10(Math.abs(rms) + 1e-10));
     
-    // 환경 분류 및 적응적 필터 강도 설정
+    // 환경 분류 및 적응적 필터 강도 설정 (수동 모드 고려)
     let environment = '측정 중';
-    if (noiseLevel <= -40) {
-      environment = '🏠 조용함';
-      adaptiveFilterStrength = 20;
-    } else if (noiseLevel <= -20) {
-      environment = '🏢 보통';
-      adaptiveFilterStrength = 50;
+    
+    if (autoQEnabled) {
+      // 자동 모드: 환경에 따른 동적 조절
+      if (noiseLevel <= -40) {
+        environment = '🏠 조용함';
+        adaptiveFilterStrength = 20;
+      } else if (noiseLevel <= -20) {
+        environment = '🏢 보통';
+        adaptiveFilterStrength = 50;
+      } else {
+        environment = '🚗 시끄러움';
+        adaptiveFilterStrength = 80;
+      }
+      console.log(`자동 모드 - 노이즈: ${noiseLevel}dB, 환경: ${environment}, 강도: ${adaptiveFilterStrength}%`);
     } else {
-      environment = '🚗 시끄러움';
-      adaptiveFilterStrength = 80;
+      // 수동 모드: 고정값 사용
+      environment = '🔧 수동 제어';
+      adaptiveFilterStrength = 0; // 수동 모드에서는 고정
+      console.log(`수동 모드 - Q값 범위: ${minQValue}-${maxQValue}`);
     }
     
     // 압축량 계산 (간단한 추정)
@@ -874,10 +930,18 @@ function startAdvancedMonitoring() {
     compressionRms = Math.sqrt(compressionRms / timeDataArray.length);
     const compressionPercent = Math.min(Math.round(compressionRms * 100), 100);
     
-    // 디스플레이 업데이트
+    // 디스플레이 업데이트 (모드별 처리)
     environmentType.textContent = environment;
-    adaptiveStrength.textContent = `${adaptiveFilterStrength}%`;
+    
+    if (autoQEnabled) {
+      adaptiveStrength.textContent = `${adaptiveFilterStrength}%`;
+    } else {
+      // 수동 모드: Q값 범위 표시
+      adaptiveStrength.textContent = `Q: ${minQValue}-${maxQValue}`;
+    }
+    
     compressionAmount.textContent = `${compressionPercent}%`;
+    console.log(`📊 디스플레이 업데이트 - 환경: ${environment}, 압축: ${compressionPercent}%`);
     
     // 적응적 필터 적용 (자동/수동 Q값 제어) - 개선된 로직
     if (notchFilter60Hz && document.getElementById('powerNoiseFilter').checked) {
