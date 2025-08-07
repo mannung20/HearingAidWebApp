@@ -902,11 +902,11 @@ function startAdvancedMonitoring() {
     let environment = '측정 중';
     
     if (autoQEnabled) {
-      // 자동 모드: 환경에 따른 동적 조절
-      if (noiseLevel <= -40) {
+      // 자동 모드: 환경에 따른 동적 조절 (기준값 개선)
+      if (noiseLevel <= -30) {
         environment = '🏠 조용함';
         adaptiveFilterStrength = 20;
-      } else if (noiseLevel <= -20) {
+      } else if (noiseLevel <= 0) {
         environment = '🏢 보통';
         adaptiveFilterStrength = 50;
       } else {
@@ -921,14 +921,23 @@ function startAdvancedMonitoring() {
       console.log(`수동 모드 - Q값 범위: ${minQValue}-${maxQValue}`);
     }
     
-    // 압축량 계산 (간단한 추정)
-    analyserEnv.getFloatTimeDomainData(timeDataArray);
-    let compressionRms = 0;
-    for (let i = 0; i < timeDataArray.length; i++) {
-      compressionRms += timeDataArray[i] * timeDataArray[i];
+    // 압축량 계산 (실제 컴프레서 파라미터 기반)
+    let compressionPercent = 0;
+    if (compressorNode) {
+      const threshold = parseFloat(thresholdSlider.value);
+      const ratio = parseFloat(ratioSlider.value);
+      
+      // 입력 레벨 계산 (현재 노이즈 레벨 기준)
+      const inputLevel = Math.max(noiseLevel, threshold);
+      
+      // 실제 압축량 계산: (입력 - 역치) / 비율
+      if (inputLevel > threshold) {
+        const excessLevel = inputLevel - threshold;
+        const compressedExcess = excessLevel / ratio;
+        const reduction = excessLevel - compressedExcess;
+        compressionPercent = Math.min(Math.round((reduction / Math.abs(threshold)) * 100), 100);
+      }
     }
-    compressionRms = Math.sqrt(compressionRms / timeDataArray.length);
-    const compressionPercent = Math.min(Math.round(compressionRms * 100), 100);
     
     // 디스플레이 업데이트 (모드별 처리)
     environmentType.textContent = environment;
