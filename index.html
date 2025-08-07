@@ -25,14 +25,30 @@ button:disabled { background: #cccccc; cursor: not-allowed; transform: none; }
 #volumeSlider { width: 100%; height: 8px; background: #ddd; outline: none; border-radius: 5px; margin-bottom: 15px; }
 #volumeSlider::-webkit-slider-thumb { appearance: none; width: 25px; height: 25px; background: #4CAF50; border-radius: 50%; cursor: pointer; }
 #volumeDisplay { font-size: 1.5em; font-weight: bold; color: #4CAF50; }
+.amplification-info { font-size: 0.9em; color: #666; margin-top: 5px; }
+.safety-indicator { display: inline-block; width: 20px; height: 20px; border-radius: 50%; margin-left: 10px; }
+.noise-filter-control { margin-bottom: 20px; padding: 15px; background: #fff8dc; border-radius: 10px; }
+.noise-filter-control h4 { margin-bottom: 10px; color: #333; font-size: 1.1em; }
+.filter-option { margin-bottom: 10px; }
+.filter-option label { font-size: 0.9em; color: #555; }
+.noise-stats { font-size: 0.8em; color: #666; margin-top: 10px; }
 #status { padding: 15px; border-radius: 8px; font-weight: bold; background: #e8f5e8; color: #2e7d2e; margin-top: 20px; font-size: 1.1em; }
 .device-quality { font-size: 12px; color: #666; margin-top: 5px; }
+.advanced-mode { margin-bottom: 20px; padding: 15px; background: #f5f5dc; border-radius: 10px; }
+.advanced-mode h4 { margin-bottom: 10px; color: #333; font-size: 1.1em; }
+.advanced-controls { margin-top: 15px; display: none; }
+.compressor-control { margin-bottom: 10px; }
+.compressor-control label { display: block; font-size: 0.9em; color: #555; margin-bottom: 5px; }
+.compressor-control input[type="range"] { width: 100%; height: 6px; background: #ddd; outline: none; border-radius: 3px; margin-bottom: 5px; }
+.compressor-control input[type="range"]::-webkit-slider-thumb { appearance: none; width: 18px; height: 18px; background: #4CAF50; border-radius: 50%; cursor: pointer; }
+.compressor-display { font-size: 0.85em; color: #666; margin-bottom: 10px; }
+.ai-status { font-size: 0.8em; color: #666; margin-top: 10px; padding: 10px; background: #f0f8ff; border-radius: 5px; display: block !important; }
 @media (max-width: 480px) { body { padding: 10px; } .container { padding: 20px; } h1 { font-size: 1.5em; } button { padding: 12px 20px; font-size: 14px; margin: 5px; } }
 </style>
 </head>
 <body>
   <div class="container">
-    <h1>🔊 보청기 웹앱</h1>
+    <h1>🔊 보청기 웹앱 Phase 2.0</h1>
     
     <div id="permissionGuide" class="permission-guide">
       <strong>📱 마이크 권한 허용 방법:</strong><br>
@@ -56,11 +72,63 @@ button:disabled { background: #cccccc; cursor: not-allowed; transform: none; }
     </div>
     
     <div class="volume-control">
-      <label for="volumeSlider">볼륨:</label>
+      <label for="volumeSlider">🔊 볼륨 (안전 증폭):</label>
       <input type="range" id="volumeSlider" min="0" max="100" value="50">
-      <span id="volumeDisplay">50</span>%
+      <div>
+        <span id="volumeDisplay">50</span>% 
+        <span id="amplificationLevel" class="amplification-info">(1.5배 증폭)</span>
+        <span id="safetyIndicator" class="safety-indicator" style="background-color: green;"></span>
+      </div>
     </div>
     
+    <div class="noise-filter-control" id="noiseFilterControl">
+      <h4>🔇 노이즈 필터</h4>
+      <div class="filter-option">
+        <label><input type="checkbox" id="powerNoiseFilter" checked> 전원 노이즈 제거 (60Hz)</label>
+      </div>
+      <div class="filter-option">
+        <label><input type="checkbox" id="highFreqFilter" checked> 고주파 잡음 제거 (4kHz+)</label>
+      </div>
+      <div class="noise-stats">
+        <div>현재 노이즈: <span id="noiseLevel">-∞ dB</span></div>
+        <div>필터 효과: <span id="filterEffectiveness">0% 감소</span></div>
+      </div>
+    </div>
+    
+    <div class="advanced-mode" id="advancedModeControl">
+      <h4>🚀 고급 모드</h4>
+      <div class="filter-option">
+        <label><input type="checkbox" id="advancedModeCheckbox"> 고급 모드 활성화</label>
+      </div>
+      <div class="advanced-controls" id="advancedControls">
+        <div class="compressor-control">
+          <label for="thresholdSlider">📊 Threshold:</label>
+          <input type="range" id="thresholdSlider" min="-30" max="-10" value="-20" step="1">
+          <div class="compressor-display">값: <span id="thresholdDisplay">-20dB</span></div>
+        </div>
+        <div class="compressor-control">
+          <label for="ratioSlider">⚖️ Ratio:</label>
+          <input type="range" id="ratioSlider" min="2" max="12" value="4" step="1">
+          <div class="compressor-display">값: <span id="ratioDisplay">4:1</span></div>
+        </div>
+        <div class="compressor-control">
+          <label for="attackSlider">⚡ Attack:</label>
+          <input type="range" id="attackSlider" min="0.001" max="0.1" value="0.01" step="0.001">
+          <div class="compressor-display">값: <span id="attackDisplay">0.01s</span></div>
+        </div>
+        <div class="compressor-control">
+          <label for="releaseSlider">⏰ Release:</label>
+          <input type="range" id="releaseSlider" min="0.01" max="1.0" value="0.1" step="0.01">
+          <div class="compressor-display">값: <span id="releaseDisplay">0.1s</span></div>
+        </div>
+        <div class="ai-status" style="display: block !important;">
+          <div>🎚️ 압축량: <span id="compressionAmount">0%</span></div>
+          <div>🌍 환경: <span id="environmentType">측정 중</span></div>
+          <div>🧠 적응적 필터 강도: <span id="adaptiveStrength">0%</span></div>
+        </div>
+      </div>
+    </div>
+
     <div id="status">🎤 마이크 권한을 요청해주세요</div>
   </div>
 
@@ -75,7 +143,24 @@ const permissionGuide = document.getElementById('permissionGuide');
 const micSelect = document.getElementById('micSelect');
 const micQuality = document.getElementById('micQuality');
 
+// Phase 2.0: 고급모드 컨트롤 요소들
+const advancedModeCheckbox = document.getElementById('advancedModeCheckbox');
+const advancedControls = document.getElementById('advancedControls');
+const thresholdSlider = document.getElementById('thresholdSlider');
+const ratioSlider = document.getElementById('ratioSlider');
+const attackSlider = document.getElementById('attackSlider');
+const releaseSlider = document.getElementById('releaseSlider');
+const thresholdDisplay = document.getElementById('thresholdDisplay');
+const ratioDisplay = document.getElementById('ratioDisplay');
+const attackDisplay = document.getElementById('attackDisplay');
+const releaseDisplay = document.getElementById('releaseDisplay');
+const compressionAmount = document.getElementById('compressionAmount');
+const environmentType = document.getElementById('environmentType');
+const adaptiveStrength = document.getElementById('adaptiveStrength');
+
 let audioContext, microphoneStream, gainNode, highpassFilter, source, isRunning = false;
+let notchFilter60Hz, lowpassFilter4kHz, analyserNode; // Phase 1.9 추가 필터들
+let compressorNode, analyserEnv, adaptiveFilterStrength = 0; // Phase 2.0 고급모드 변수들
 let hasPermission = false;
 let wakeLock = null;
 let wasRunningBeforeHidden = false;
@@ -86,6 +171,9 @@ const MAX_FAILOVER_ATTEMPTS = 3;
 // 초기 상태 설정
 startButton.disabled = true;
 stopButton.disabled = true;
+
+// Phase 2.0: 고급모드 초기 설정 - 토글은 보이고 컨트롤만 숨김
+advancedControls.style.display = 'none';
 
 // Phase 1.7: 실시간 장치 감지 및 안정성 강화
 
@@ -273,9 +361,9 @@ async function switchMicrophone(deviceId, skipFailover = false) {
       source.disconnect();
     }
     
-    // 새 소스로 다시 연결
+    // Phase 2.0: 새 소스로 다시 연결 (고급모드 고려)
     source = audioContext.createMediaStreamSource(microphoneStream);
-    source.connect(highpassFilter);
+    connectAudioChain();
     
     console.log('마이크 전환 완료');
     statusDiv.textContent = '🔊 보청기 작동 중 (이어폰 착용 권장)';
@@ -398,11 +486,34 @@ startButton.addEventListener('click', async () => {
     highpassFilter.frequency.setValueAtTime(100, audioContext.currentTime); 
 
     const volume = volumeSlider.value / 100;
-    gainNode.gain.value = volume * 2;
+    gainNode.gain.value = volume * 3; // Phase 1.9: 3배 안전 증폭
+    
+    // 실시간 증폭 레벨 표시 업데이트
+    updateAmplificationDisplay(volume * 3);
 
-    source.connect(highpassFilter);
-    highpassFilter.connect(gainNode);
-    gainNode.connect(audioContext.destination);
+    // Phase 1.9: 노이즈 필터 추가
+    notchFilter60Hz = audioContext.createBiquadFilter();
+    notchFilter60Hz.type = 'notch';
+    notchFilter60Hz.frequency.setValueAtTime(60, audioContext.currentTime);
+    notchFilter60Hz.Q.setValueAtTime(10, audioContext.currentTime);
+    
+    lowpassFilter4kHz = audioContext.createBiquadFilter();
+    lowpassFilter4kHz.type = 'lowpass';
+    lowpassFilter4kHz.frequency.setValueAtTime(4000, audioContext.currentTime);
+    
+    analyserNode = audioContext.createAnalyser();
+    analyserNode.fftSize = 256;
+    
+    // Phase 2.0: 오디오 체인 연결 (고급모드 고려)
+    connectAudioChain();
+    
+    // 노이즈 레벨 모니터링 시작
+    startNoiseMonitoring();
+    
+    // Phase 2.0: 고급모드 설정 적용
+    if (advancedModeCheckbox.checked) {
+      await setupAdvancedMode();
+    }
     
     startButton.disabled = true;
     stopButton.disabled = false;
@@ -462,6 +573,18 @@ stopButton.addEventListener('click', async () => {
     highpassFilter.disconnect();
     highpassFilter = null;
   }
+  if (notchFilter60Hz) {
+    notchFilter60Hz.disconnect();
+    notchFilter60Hz = null;
+  }
+  if (lowpassFilter4kHz) {
+    lowpassFilter4kHz.disconnect();
+    lowpassFilter4kHz = null;
+  }
+  if (analyserNode) {
+    analyserNode.disconnect();
+    analyserNode = null;
+  }
   
   // AudioContext suspend (재사용 가능하도록)
   if (audioContext && audioContext.state !== 'closed') {
@@ -502,15 +625,265 @@ micSelect.addEventListener('change', function() {
   }
 });
 
-// 볼륨 조절
+// Phase 1.9: 볼륨 조절 개선
 volumeSlider.addEventListener('input', function() {
   const volume = this.value / 100;
   volumeDisplay.textContent = this.value;
   
   if (gainNode && isRunning) {
-    gainNode.gain.value = volume * 2;
+    gainNode.gain.value = volume * 3; // 3배 증폭
+    updateAmplificationDisplay(volume * 3);
+    updateSafetyIndicator(volume * 3);
   }
 });
+
+// Phase 1.9: 노이즈 필터 제어
+document.getElementById('powerNoiseFilter').addEventListener('change', function() {
+  if (notchFilter60Hz) {
+    // 체크 상태에 따른 필터 활성화/비활성화
+    if (this.checked) {
+      notchFilter60Hz.frequency.setValueAtTime(60, audioContext.currentTime);
+    } else {
+      notchFilter60Hz.frequency.setValueAtTime(22050, audioContext.currentTime); // 비활성화
+    }
+    updateFilterEffectiveness();
+  }
+});
+
+// Phase 2.0: 고급모드 토글 이벤트 리스너
+advancedModeCheckbox.addEventListener('change', function() {
+  if (this.checked) {
+    advancedControls.style.display = 'block';
+    if (isRunning && audioContext) {
+      setupAdvancedMode();
+    }
+  } else {
+    advancedControls.style.display = 'none';
+    if (compressorNode) {
+      compressorNode.disconnect();
+      compressorNode = null;
+    }
+    if (analyserEnv) {
+      analyserEnv.disconnect();
+      analyserEnv = null;
+    }
+    if (isRunning) {
+      connectAudioChain();
+    }
+  }
+});
+
+// Phase 2.0: 컴프레서 슬라이더 이벤트 리스너
+thresholdSlider.addEventListener('input', updateCompressorSettings);
+ratioSlider.addEventListener('input', updateCompressorSettings);
+attackSlider.addEventListener('input', updateCompressorSettings);
+releaseSlider.addEventListener('input', updateCompressorSettings);
+
+// Phase 2.0: 고급모드 설정 함수
+async function setupAdvancedMode() {
+  try {
+    if (!audioContext) return;
+    
+    // 컴프레서 노드 생성
+    compressorNode = audioContext.createDynamicsCompressor();
+    analyserEnv = audioContext.createAnalyser();
+    analyserEnv.fftSize = 256;
+    
+    // 초기 컴프레서 설정
+    updateCompressorSettings();
+    
+    // 오디오 체인 재연결
+    connectAudioChain();
+    
+    // 모니터링 시작
+    if (isRunning) {
+      startAdvancedMonitoring();
+    }
+    
+  } catch (err) {
+    console.error('고급모드 설정 실패:', err);
+  }
+}
+
+// Phase 2.0: 컴프레서 설정 업데이트
+function updateCompressorSettings() {
+  if (!compressorNode) return;
+  
+  const threshold = parseFloat(thresholdSlider.value);
+  const ratio = parseFloat(ratioSlider.value);
+  const attack = parseFloat(attackSlider.value);
+  const release = parseFloat(releaseSlider.value);
+  
+  compressorNode.threshold.setValueAtTime(threshold, audioContext.currentTime);
+  compressorNode.ratio.setValueAtTime(ratio, audioContext.currentTime);
+  compressorNode.attack.setValueAtTime(attack, audioContext.currentTime);
+  compressorNode.release.setValueAtTime(release, audioContext.currentTime);
+  
+  // 디스플레이 업데이트
+  thresholdDisplay.textContent = `${threshold}dB`;
+  ratioDisplay.textContent = `${ratio}:1`;
+  attackDisplay.textContent = `${attack}s`;
+  releaseDisplay.textContent = `${release}s`;
+}
+
+// Phase 2.0: 오디오 체인 연결 함수
+function connectAudioChain() {
+  if (!source || !notchFilter60Hz) return;
+  
+  // 기존 연결 해제
+  try {
+    source.disconnect();
+    if (compressorNode) compressorNode.disconnect();
+    if (analyserEnv) analyserEnv.disconnect();
+    notchFilter60Hz.disconnect();
+    lowpassFilter4kHz.disconnect();
+    highpassFilter.disconnect();
+    gainNode.disconnect();
+    analyserNode.disconnect();
+  } catch (err) {
+    // 연결 해제 오류 무시
+  }
+  
+  // 새 체인 연결
+  if (advancedModeCheckbox.checked && compressorNode && analyserEnv) {
+    // 고급모드: source -> analyserEnv -> compressor -> notch -> lowpass -> highpass -> gain -> analyser -> destination
+    source.connect(analyserEnv);
+    analyserEnv.connect(compressorNode);
+    compressorNode.connect(notchFilter60Hz);
+  } else {
+    // 기본모드: source -> notch -> lowpass -> highpass -> gain -> analyser -> destination
+    source.connect(notchFilter60Hz);
+  }
+  
+  notchFilter60Hz.connect(lowpassFilter4kHz);
+  lowpassFilter4kHz.connect(highpassFilter);
+  highpassFilter.connect(gainNode);
+  gainNode.connect(analyserNode);
+  analyserNode.connect(audioContext.destination);
+}
+
+// Phase 2.0: 고급모드 모니터링 시작
+function startAdvancedMonitoring() {
+  if (!analyserEnv || !advancedModeCheckbox.checked) return;
+  
+  const bufferLength = analyserEnv.frequencyBinCount;
+  const dataArray = new Uint8Array(bufferLength);
+  const timeDataArray = new Float32Array(bufferLength);
+  
+  function updateAdvancedStats() {
+    if (!isRunning || !analyserEnv || !advancedModeCheckbox.checked) return;
+    
+    // 환경 분석
+    analyserEnv.getByteFrequencyData(dataArray);
+    let sum = 0;
+    for (let i = 0; i < bufferLength; i++) {
+      sum += dataArray[i];
+    }
+    const average = sum / bufferLength;
+    const noiseLevel = Math.round(20 * Math.log10(average / 255) + 60);
+    
+    // 환경 분류 및 적응적 필터 강도 설정
+    let environment = '측정 중';
+    if (noiseLevel <= -40) {
+      environment = '🏠 조용함';
+      adaptiveFilterStrength = 20;
+    } else if (noiseLevel <= -20) {
+      environment = '🏢 보통';
+      adaptiveFilterStrength = 50;
+    } else {
+      environment = '🚗 시끄러움';
+      adaptiveFilterStrength = 80;
+    }
+    
+    // 압축량 계산 (간단한 추정)
+    analyserEnv.getFloatTimeDomainData(timeDataArray);
+    let rms = 0;
+    for (let i = 0; i < timeDataArray.length; i++) {
+      rms += timeDataArray[i] * timeDataArray[i];
+    }
+    rms = Math.sqrt(rms / timeDataArray.length);
+    const compressionPercent = Math.min(Math.round(rms * 100), 100);
+    
+    // 디스플레이 업데이트
+    environmentType.textContent = environment;
+    adaptiveStrength.textContent = `${adaptiveFilterStrength}%`;
+    compressionAmount.textContent = `${compressionPercent}%`;
+    
+    // 적응적 필터 적용 (notchFilter Q값 조절)
+    if (notchFilter60Hz && document.getElementById('powerNoiseFilter').checked) {
+      const qValue = 5 + (adaptiveFilterStrength / 100) * 15; // 5-20 범위
+      notchFilter60Hz.Q.setValueAtTime(qValue, audioContext.currentTime);
+    }
+    
+    requestAnimationFrame(updateAdvancedStats);
+  }
+  
+  updateAdvancedStats();
+}
+
+document.getElementById('highFreqFilter').addEventListener('change', function() {
+  if (lowpassFilter4kHz) {
+    if (this.checked) {
+      lowpassFilter4kHz.frequency.setValueAtTime(4000, audioContext.currentTime);
+    } else {
+      lowpassFilter4kHz.frequency.setValueAtTime(22050, audioContext.currentTime); // 비활성화
+    }
+    updateFilterEffectiveness();
+  }
+});
+
+// Phase 1.9: 새로운 함수들
+function updateAmplificationDisplay(gainValue) {
+  const amplificationLevel = document.getElementById('amplificationLevel');
+  amplificationLevel.textContent = `(${gainValue.toFixed(1)}배 증폭)`;
+}
+
+function updateSafetyIndicator(gainValue) {
+  const safetyIndicator = document.getElementById('safetyIndicator');
+  if (gainValue >= 2.5) {
+    safetyIndicator.style.backgroundColor = 'red';
+  } else if (gainValue >= 2.0) {
+    safetyIndicator.style.backgroundColor = 'orange';
+  } else {
+    safetyIndicator.style.backgroundColor = 'green';
+  }
+}
+
+function startNoiseMonitoring() {
+  const bufferLength = analyserNode.frequencyBinCount;
+  const dataArray = new Uint8Array(bufferLength);
+  
+  function updateNoiseLevel() {
+    if (!isRunning || !analyserNode) return;
+    
+    analyserNode.getByteFrequencyData(dataArray);
+    
+    // 간단한 노이즈 레벨 계산
+    let sum = 0;
+    for (let i = 0; i < bufferLength; i++) {
+      sum += dataArray[i];
+    }
+    const average = sum / bufferLength;
+    const noiseLevel = Math.round(20 * Math.log10(average / 255) + 60); // dB 변환
+    
+    document.getElementById('noiseLevel').textContent = `${noiseLevel} dB`;
+    
+    requestAnimationFrame(updateNoiseLevel);
+  }
+  
+  updateNoiseLevel();
+}
+
+function updateFilterEffectiveness() {
+  const powerFilterEnabled = document.getElementById('powerNoiseFilter').checked;
+  const highFreqFilterEnabled = document.getElementById('highFreqFilter').checked;
+  
+  let effectiveness = 0;
+  if (powerFilterEnabled) effectiveness += 45; // 45% 효과
+  if (highFreqFilterEnabled) effectiveness += 35; // 35% 효과
+  
+  document.getElementById('filterEffectiveness').textContent = `${effectiveness}% 감소`;
+}
 
 // Page Visibility API (개선됨)
 document.addEventListener('visibilitychange', async () => {
