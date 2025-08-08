@@ -683,25 +683,50 @@ document.getElementById('powerNoiseFilter').addEventListener('change', function(
   }
 });
 
-// Phase 2.0: 고급모드 토글 이벤트 리스너
+// Phase 2.0: 고급모드 토글 이벤트 리스너 (수정됨 - 체인 재연결 로직 강화)
 advancedModeCheckbox.addEventListener('change', function() {
+  console.log(`🔧 Advanced mode toggled: ${this.checked ? 'ON' : 'OFF'}`);
+  
   if (this.checked) {
+    // 고급모드 활성화
     advancedControls.style.display = 'block';
     if (isRunning && audioContext) {
-      setupAdvancedMode();
+      console.log('🚀 Setting up advanced mode...');
+      setupAdvancedMode().then(() => {
+        console.log('✅ Advanced mode setup complete');
+      }).catch(err => {
+        console.error('❌ Advanced mode setup failed:', err);
+      });
     }
   } else {
+    // 고급모드 비활성화
     advancedControls.style.display = 'none';
-    if (compressorNode) {
-      compressorNode.disconnect();
-      compressorNode = null;
+    console.log('📡 Switching to basic mode...');
+    
+    // 고급모드 전용 노드들 정리
+    try {
+      if (compressorNode) {
+        compressorNode.disconnect();
+        compressorNode = null;
+        console.log('🗑️ Compressor node cleaned up');
+      }
+      if (analyserEnv) {
+        analyserEnv.disconnect();
+        analyserEnv = null;
+        console.log('🗑️ Environment analyser cleaned up');
+      }
+    } catch (err) {
+      console.warn('⚠️ Cleanup warning:', err.message);
     }
-    if (analyserEnv) {
-      analyserEnv.disconnect();
-      analyserEnv = null;
-    }
-    if (isRunning) {
-      connectAudioChain();
+    
+    // 기본모드로 체인 재연결
+    if (isRunning && source) {
+      const reconnected = connectAudioChain();
+      if (reconnected) {
+        console.log('✅ Switched to basic mode successfully');
+      } else {
+        console.error('❌ Failed to reconnect in basic mode');
+      }
     }
   }
 });
@@ -787,45 +812,94 @@ function applyManualQValue() {
   }
 }
 
-// Phase 2.0: 고급모드 설정 함수
+// Phase 2.0: 고급모드 설정 함수 (수정됨 - 에러 처리 강화)
 async function setupAdvancedMode() {
   try {
-    if (!audioContext) return;
+    if (!audioContext) {
+      console.error('❌ AudioContext not available for advanced mode');
+      return false;
+    }
+    
+    if (audioContext.state !== 'running') {
+      console.warn('⚠️ AudioContext not running, attempting to resume...');
+      await audioContext.resume();
+    }
+    
+    console.log('🏗️ Creating advanced mode nodes...');
     
     // 컴프레서 노드 생성
     compressorNode = audioContext.createDynamicsCompressor();
     analyserEnv = audioContext.createAnalyser();
     analyserEnv.fftSize = 256;
     
+    console.log('🎛️ Advanced nodes created successfully');
+    
     // 초기 컴프레서 설정
     updateCompressorSettings();
     
     // 오디오 체인 재연결
-    connectAudioChain();
+    const chainConnected = connectAudioChain();
+    if (!chainConnected) {
+      throw new Error('Failed to connect advanced audio chain');
+    }
     
     // 모니터링 시작
     if (isRunning) {
       startAdvancedMonitoring();
+      console.log('📊 Advanced monitoring started');
     }
     
+    return true;
+    
   } catch (err) {
-    console.error('고급모드 설정 실패:', err);
+    console.error('❌ Advanced mode setup failed:', err);
+    
+    // 실패 시 정리
+    if (compressorNode) {
+      compressorNode.disconnect();
+      compressorNode = null;
+    }
+    if (analyserEnv) {
+      analyserEnv.disconnect();
+      analyserEnv = null;
+    }
+    
+    return false;
   }
 }
 
-// Phase 2.0: 컴프레서 설정 업데이트
+// Phase 2.0: 컴프레서 설정 업데이트 (수정됨 - linearRampToValueAtTime 사용)
 function updateCompressorSettings() {
-  if (!compressorNode) return;
+  // compressorNode 존재 및 연결 상태 확인
+  if (!compressorNode) {
+    console.warn('⚠️ Compressor node not initialized. Advanced Mode may be disabled.');
+    return;
+  }
+  
+  if (!audioContext || audioContext.state !== 'running') {
+    console.warn('⚠️ AudioContext not running. Current state:', audioContext ? audioContext.state : 'null');
+    return;
+  }
   
   const threshold = parseFloat(thresholdSlider.value);
   const ratio = parseFloat(ratioSlider.value);
   const attack = parseFloat(attackSlider.value);
   const release = parseFloat(releaseSlider.value);
   
-  compressorNode.threshold.setValueAtTime(threshold, audioContext.currentTime);
-  compressorNode.ratio.setValueAtTime(ratio, audioContext.currentTime);
-  compressorNode.attack.setValueAtTime(attack, audioContext.currentTime);
-  compressorNode.release.setValueAtTime(release, audioContext.currentTime);
+  // linearRampToValueAtTime 사용으로 부드러운 전환 (0.1초)
+  const currentTime = audioContext.currentTime;
+  const rampTime = 0.1;
+  
+  try {
+    compressorNode.threshold.linearRampToValueAtTime(threshold, currentTime + rampTime);
+    compressorNode.ratio.linearRampToValueAtTime(ratio, currentTime + rampTime);
+    compressorNode.attack.linearRampToValueAtTime(attack, currentTime + rampTime);
+    compressorNode.release.linearRampToValueAtTime(release, currentTime + rampTime);
+    
+    console.log(`🎛️ Compressor settings updated: T:${threshold}dB, R:${ratio}:1, A:${attack}s, Rel:${release}s`);
+  } catch (err) {
+    console.error('❌ Failed to update compressor settings:', err);
+  }
   
   // 디스플레이 업데이트
   thresholdDisplay.textContent = `${threshold}dB`;
@@ -834,12 +908,18 @@ function updateCompressorSettings() {
   releaseDisplay.textContent = `${release}s`;
 }
 
-// Phase 2.0: 오디오 체인 연결 함수
+// Phase 2.0: 오디오 체인 연결 함수 (수정됨 - 연결 상태 확인 로직 추가)
 function connectAudioChain() {
-  console.log("Connecting audio chain...");
-  if (!source || !notchFilter60Hz) {
-    console.warn("Source or Notch filter not ready");
-    return;
+  console.log('🔗 Connecting audio chain...');
+  
+  // 필수 노드들 존재 확인
+  if (!source) {
+    console.error('❌ Source node not ready');
+    return false;
+  }
+  if (!notchFilter60Hz || !lowpassFilter4kHz || !highpassFilter || !gainNode || !analyserNode) {
+    console.error('❌ Required audio nodes not initialized');
+    return false;
   }
   
   // 기존 연결 해제
@@ -852,28 +932,38 @@ function connectAudioChain() {
     highpassFilter.disconnect();
     gainNode.disconnect();
     analyserNode.disconnect();
+    console.log('🔄 Previous connections disconnected');
   } catch (err) {
-    // 연결 해제 오류 무시
+    console.warn('⚠️ Some disconnections failed (normal on first run):', err.message);
   }
   
-  // 새 체인 연결
-  if (advancedModeCheckbox.checked && compressorNode && analyserEnv) {
-    // 고급모드: source -> analyserEnv -> compressor -> notch -> lowpass -> highpass -> gain -> analyser -> destination
-    source.connect(analyserEnv);
-    analyserEnv.connect(compressorNode);
-    compressorNode.connect(notchFilter60Hz);
-  } else {
-    // 기본모드: source -> notch -> lowpass -> highpass -> gain -> analyser -> destination
-    source.connect(notchFilter60Hz);
+  try {
+    // 새 체인 연결 - 고급모드 확인
+    if (advancedModeCheckbox.checked && compressorNode && analyserEnv) {
+      // 고급모드: source -> analyserEnv -> compressor -> notch -> lowpass -> highpass -> gain -> analyser -> destination
+      source.connect(analyserEnv);
+      analyserEnv.connect(compressorNode);
+      compressorNode.connect(notchFilter60Hz);
+      console.log('🚀 Advanced mode chain: source -> analyserEnv -> compressor -> filters -> gain -> output');
+    } else {
+      // 기본모드: source -> notch -> lowpass -> highpass -> gain -> analyser -> destination
+      source.connect(notchFilter60Hz);
+      console.log('📡 Basic mode chain: source -> filters -> gain -> output');
+    }
+    
+    // 공통 필터 체인 연결
+    notchFilter60Hz.connect(lowpassFilter4kHz);
+    lowpassFilter4kHz.connect(highpassFilter);
+    highpassFilter.connect(gainNode);
+    gainNode.connect(analyserNode);
+    analyserNode.connect(audioContext.destination);
+    
+    console.log('✅ Audio chain connected successfully');
+    return true;
+  } catch (err) {
+    console.error('❌ Failed to connect audio chain:', err);
+    return false;
   }
-  
-  notchFilter60Hz.connect(lowpassFilter4kHz);
-  lowpassFilter4kHz.connect(highpassFilter);
-  highpassFilter.connect(gainNode);
-  gainNode.connect(analyserNode);
-  analyserNode.connect(audioContext.destination);
-  
-  console.log("Audio chain connected.");
 }
 
 // Phase 2.0: 고급모드 모니터링 시작
